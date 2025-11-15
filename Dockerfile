@@ -1,3 +1,6 @@
+# ============================================
+# Build Stage
+# ============================================
 FROM node:18-alpine AS builder
 
 WORKDIR /app
@@ -5,8 +8,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install dependencies (including devDependencies for build)
+RUN npm ci && npm cache clean --force
 
 # Copy source code
 COPY . .
@@ -14,10 +17,15 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Production stage
+# ============================================
+# Production Stage
+# ============================================
 FROM node:18-alpine AS production
 
 WORKDIR /app
+
+# Set NODE_ENV
+ENV NODE_ENV=production
 
 # Copy package files
 COPY package*.json ./
@@ -25,21 +33,28 @@ COPY package*.json ./
 # Install only production dependencies
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy built application
+# Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nestjs -u 1001
+# Copy necessary runtime files (if any)
+# COPY --from=builder /app/.env.example ./.env.example
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001 -G nodejs
 
 # Change ownership of the app directory
 RUN chown -R nestjs:nodejs /app
+
+# Switch to non-root user
 USER nestjs
 
-EXPOSE 3000
+# Expose port 8080 as required by the challenge
+EXPOSE 8080
 
+# Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node healthcheck.js
+  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
+# Start the application
 CMD ["node", "dist/main"]

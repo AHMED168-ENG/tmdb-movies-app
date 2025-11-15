@@ -1,46 +1,129 @@
+version: "3.8"
+
 services:
+  # ============================================
+  # MongoDB Database
+  # ============================================
+  mongodb:
+    image: mongo:7.0
+    container_name: tmdb-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password123}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-tmdb}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - tmdb-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ============================================
+  # Redis Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: tmdb-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - tmdb-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    command: redis-server --appendonly yes
+
+  # ============================================
+  # NestJS Application (Port 8080)
+  # ============================================
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: tmdb-movies-app
+      target: production
+    container_name: tmdb-app
+    restart: unless-stopped
     ports:
-      - "8080:3000"
+      - "8080:8080" # ✅ As required by the challenge
     environment:
-      - NODE_ENV=development
-      - PORT=3000
-      - MONGODB_URI=mongodb://mongodb:27017/tmdb_movies
-      - TMDB_API_KEY=${TMDB_API_KEY:-your_tmdb_api_key_here}
-      - API_KEY=${API_KEY:-dev-api-key-123}
+      # Application
+      NODE_ENV: production
+      PORT: 8080
+
+      # MongoDB Configuration
+      MONGO_URI: mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-password123}@mongodb:27017/${MONGO_DATABASE:-tmdb}?authSource=admin
+
+      # Redis Configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # TMDB API
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      TMDB_BASE_URL: https://api.themoviedb.org/3
+
+      # JWT Configuration (if using authentication)
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-7d}
+
+      # Rate Limiting
+      THROTTLE_TTL: 60
+      THROTTLE_LIMIT: 10
+
+      # Caching
+      CACHE_TTL: 300
     depends_on:
       mongodb:
         condition: service_healthy
-    restart: unless-stopped
+      redis:
+        condition: service_healthy
     networks:
-      - app-network
-
-  mongodb:
-    image: mongo:6.0
-    container_name: tmdb-mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_DATABASE=tmdb_movies
+      - tmdb-network
     volumes:
-      - mongodb_data:/data/db
-    networks:
-      - app-network
+      # Mount logs directory (optional)
+      - ./logs:/app/logs
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/tmdb_movies --quiet
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8080/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+# ============================================
+# Networks
+# ============================================
+networks:
+  tmdb-network:
+    driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
 volumes:
   mongodb_data:
     driver: local
-
-networks:
-  app-network:
-    driver: bridge
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local
