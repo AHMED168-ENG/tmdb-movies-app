@@ -31,7 +31,7 @@ import { Movie } from "./schemas/movie.schema";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { CacheInterceptor } from "../../common/interceptors/cache.interceptor";
 import { PaginatedResponseDto } from "../../common/dto/pagination.dto";
-import { ApiResponseDto } from "@/common/dto/response.dto";
+import { ApiResponseDto } from "../../common/dto/response.dto";
 
 @ApiTags("Movies")
 @Controller("movies")
